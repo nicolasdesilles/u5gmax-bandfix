@@ -8,6 +8,7 @@ exec </dev/null
 
 SCRIPT_DEST="/data/u5gmax-bandfix/band-fix.sh"
 CRON_FILE="/etc/cron.d/u5gmax-bandfix"
+CONFIG_FILE_MAIN="/data/u5gmax-bandfix/config"
 LOG_FILE="/data/u5gmax-bandfix/band-fix.log"
 TMP_DIR="/data/u5gmax-bandfix/tmp"
 
@@ -29,8 +30,15 @@ if [ ! -f "$CRON_FILE" ]; then
 SHELL=/bin/bash
 PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
 @reboot root /data/u5gmax-bandfix/on-boot.sh >> /data/u5gmax-bandfix/band-fix.log 2>&1
-5 * * * * root /data/u5gmax-bandfix/band-fix.sh >> /data/u5gmax-bandfix/band-fix.log 2>&1
+__CRON_SPEC__ root /data/u5gmax-bandfix/band-fix.sh >> /data/u5gmax-bandfix/band-fix.log 2>&1
 EOF
+    # CHECK_INTERVAL_MIN in config (1-59) runs every N minutes; unset keeps the hourly run at :05
+    _iv=$(grep -E '^CHECK_INTERVAL_MIN=' "$CONFIG_FILE_MAIN" 2>/dev/null | cut -d= -f2 | tr -d '"')
+    if printf '%s' "$_iv" | grep -qE '^[0-9]+$' && [ "$_iv" -ge 1 ] && [ "$_iv" -le 59 ]; then
+        sed -i "s|__CRON_SPEC__|*/$_iv * * * *|" "$CRON_FILE"
+    else
+        sed -i "s|__CRON_SPEC__|5 * * * *|" "$CRON_FILE"
+    fi
     chmod 644 "$CRON_FILE"
     log "Cron job restored"
 fi

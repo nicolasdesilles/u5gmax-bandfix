@@ -129,6 +129,28 @@ _get_radio_pref() {
     return $_rc
 }
 
+# --- Helper: keep the daemon's own fallback preference in line with the lock ---
+# /etc/uiwwand.json on the modem is rendered by the controller with
+# "mode": "all". uiwwand re-applies that preference as a fallback when a
+# registration search runs long, which re-enables WCDMA until the next run of
+# this script. The file lives on tmpfs, so it is regenerated on every reboot or
+# provision. Patch it idempotently on every run; nothing to do when it already
+# reads "5gnr,lte". A daemon restart is not needed: observed on firmware 7.5.3
+# that the fallback picks up the patched value live.
+_patch_daemon_config() {
+    local _out="$TMP_DIR/ssh_json.txt" _rc=0 _res
+    _ssh_bg "$_out" $SSH_OPTS "${SSH_USER}@${U5G_IP}" \
+        'f=/etc/uiwwand.json; [ -f "$f" ] || { echo missing; exit 0; }; if grep -q "\"mode\": \"all\"" "$f"; then sed -i "s/\"mode\": \"all\"/\"mode\": \"5gnr,lte\"/" "$f" && echo patched; else echo ok; fi' \
+        < /dev/null || _rc=$?
+    _res=$(tr -d '\r\n' < "$_out"); rm -f "$_out"
+    case "$_res" in
+        patched) log "Daemon config /etc/uiwwand.json: mode 'all' -> '5gnr,lte'" ;;
+        ok)      ;;
+        missing) log "WARNING: /etc/uiwwand.json not found on modem — fallback preference not patched" ;;
+        *)       log "WARNING: could not patch /etc/uiwwand.json (rc=$_rc, reply='$_res')" ;;
+    esac
+}
+
 # --- Helper: update known_hosts when IP changes ---
 # ssh-keyscan uses SIGALRM internally for its -T timeout, which does not
 # fire reliably in the UCG Fiber cron container namespace — wrap it in the
@@ -404,6 +426,9 @@ if [ "${ICCID_CACHE:-}" != "$ICCID" ]; then
         printf 'ICCID_CACHE="%s"\n' "$ICCID" >> "$CONFIG"
     fi
 fi
+
+# --- Keep the daemon's fallback preference in line (tmpfs, regenerated on reboot/provision) ---
+_patch_daemon_config
 
 # --- Fetch current band configuration ---
 log "Fetching current band config..."
